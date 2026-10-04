@@ -10,7 +10,7 @@ class CountryFirstRankingService:
     """
     Ranks jobs according to user's home country, city preferences, and remote eligibility:
     1. Home-country on-site/hybrid in preferred cities
-    2. Home-country remote
+    2. Other home-country cities and home-country remote
     3. Remote roles the user is eligible for (worldwide or allowed in home country)
     4. International roles only if open_to_international is enabled
     Applies configurable feed mix (default ~80% home country, 20% eligible remote).
@@ -26,7 +26,7 @@ class CountryFirstRankingService:
         """
         Returns (tier_number, is_included).
         Tier 1: Home-country onsite/hybrid in preferred cities
-        Tier 2: Home-country remote
+        Tier 2: Home-country onsite/hybrid outside preferred cities, or home-country remote
         Tier 3: Remote eligible (worldwide or explicit home country allowed)
         Tier 4: International onsite/hybrid (only if open_to_international is True)
         Tier 5: International / Ineligible (excluded if open_to_international is False or verdict == not_eligible)
@@ -51,7 +51,7 @@ class CountryFirstRankingService:
         if job_country == home_country and job_mode in ("onsite", "hybrid"):
             if not preferred_cities or job_city in preferred_cities:
                 return (1, True)
-            return (1, True)  # Home country other cities still Tier 1
+            return (2, True)
 
         # 2. Home country Remote
         if job_country == home_country and job_mode == "remote":
@@ -94,8 +94,8 @@ class CountryFirstRankingService:
 
         eligibility_map = eligibility_map or {}
 
-        tier1: List[Job] = [] # Home country onsite/hybrid
-        tier2: List[Job] = [] # Home country remote
+        tier1: List[Job] = [] # Preferred home-country onsite/hybrid
+        tier2: List[Job] = [] # Other domestic cities and home-country remote
         tier3: List[Job] = [] # Eligible remote
         tier4: List[Job] = [] # International (if allowed)
         tier5: List[Job] = [] # Excluded / Ineligible
