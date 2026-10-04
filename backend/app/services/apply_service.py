@@ -19,6 +19,10 @@ from app.adapters.form_fillers.base import FormFillerResult
 logger = logging.getLogger(__name__)
 
 
+class UnsupportedATSPlatformError(ValueError):
+    """Raised when no form filler is available for a job's ATS platform."""
+
+
 class ApplyService:
     def __init__(self):
         self.greenhouse_filler = GreenhouseFormFiller()
@@ -26,17 +30,19 @@ class ApplyService:
         self.ashby_filler = AshbyFormFiller()
 
     def select_filler(self, ats_type: str, apply_url: str):
-        ats = ats_type.lower()
-        url = apply_url.lower()
+        ats = (ats_type or "").lower()
+        url = (apply_url or "").lower()
         if "greenhouse" in ats or "greenhouse.io" in url:
             return self.greenhouse_filler
         elif "lever" in ats or "lever.co" in url:
             return self.lever_filler
         elif "ashby" in ats or "ashbyhq.com" in url:
             return self.ashby_filler
-        else:
-            # Fallback to Greenhouse form structure
-            return self.greenhouse_filler
+
+        platform = "Workable" if "workable" in ats or "workable.com" in url else (ats_type or "unknown ATS")
+        raise UnsupportedATSPlatformError(
+            f"Automated form filling is not supported for {platform}. Open the job portal and apply manually."
+        )
 
     async def get_or_create_application(
         self,
@@ -151,7 +157,28 @@ class ApplyService:
         pdf_path = tailored.pdf_storage_path if tailored else ""
         cover_letter = tailored.cover_letter if tailored else ""
 
-        filler = self.select_filler(job.ats_type, job.apply_url)
+        try:
+            filler = self.select_filler(job.ats_type, job.apply_url)
+        except UnsupportedATSPlatformError as exc:
+            application.failure_reason = str(exc)
+            application.deep_link_url = job.apply_url
+            application.submission_proof_screenshot = None
+            application.submission_proof_text = None
+            if application.status in ("review_ready", "failed", "requires_user_input"):
+                application.status = "tailored" if application.tailored_resume_id else "queued"
+            application.updated_at = utc_now()
+
+            db.add(ApplicationEvent(
+                id=uuid.uuid4(),
+                application_id=application.id,
+                event_type="ATS_UNSUPPORTED",
+                message=str(exc),
+                event_payload={"ats_type": job.ats_type, "apply_url": job.apply_url},
+                created_at=utc_now()
+            ))
+            await db.commit()
+            await db.refresh(application)
+            return application
 
         # Run filler
         result = await filler.fill_application(
