@@ -166,19 +166,45 @@ class ApplyService:
             is_dry_run=True
         )
 
-        # If live website navigation errored or timed out, simulate local proof capture for testing
-        if not result.screenshot_path or not os.path.exists(result.screenshot_path):
-            mock_screenshot = os.path.join(filler.screenshot_dir, f"proof_simulated_{application.id}.png")
-            with open(mock_screenshot, "wb") as f:
-                # 1x1 transparent PNG header
-                f.write(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\r\xef\x8a\xaf\x00\x00\x00\x00IEND\xaeB`\x82")
-            result.screenshot_path = mock_screenshot
-            result.proof_text = f"Simulated dry-run proof for {job.company_name} ({job.ats_type}). All fields validated."
+        screenshot_exists = bool(result.screenshot_path and os.path.isfile(result.screenshot_path))
+        if not result.success or not screenshot_exists:
+            failure_reason = result.error_message or (
+                "Dry-run did not produce a real screenshot."
+                if result.success
+                else "The ATS form filler did not complete successfully."
+            )
+            application.is_dry_run = True
+            application.status = "requires_user_input" if result.requires_user_input else "failed"
+            application.failure_reason = failure_reason
+            application.deep_link_url = result.deep_link or (job.apply_url if result.requires_user_input else None)
+            application.submission_proof_screenshot = None
+            application.submission_proof_text = None
+            application.updated_at = utc_now()
+
+            requires_input = result.requires_user_input
+            event = ApplicationEvent(
+                id=uuid.uuid4(),
+                application_id=application.id,
+                event_type="USER_INPUT_REQUIRED" if requires_input else "DRY_RUN_FAILED",
+                message=(
+                    "The application needs manual input before it can continue."
+                    if requires_input
+                    else f"Dry-run failed: {failure_reason}"
+                ),
+                event_payload=result.to_dict(),
+                created_at=utc_now()
+            )
+            db.add(event)
+            await db.commit()
+            await db.refresh(application)
+            return application
 
         # Update application state
         application.is_dry_run = True
         application.submission_proof_screenshot = result.screenshot_path
         application.submission_proof_text = result.proof_text or f"Dry-run executed for {job.title} at {job.company_name}."
+        application.failure_reason = None
+        application.deep_link_url = None
         application.status = "review_ready"
         application.updated_at = utc_now()
 
@@ -212,6 +238,9 @@ class ApplyService:
         application = app_res.scalar_one_or_none()
         if not application:
             raise ValueError("Application not found.")
+
+        if application.status != "review_ready":
+            raise ValueError("Application must have a successful dry-run before it can be approved.")
 
         application.status = "applied"
         application.applied_at = utc_now()

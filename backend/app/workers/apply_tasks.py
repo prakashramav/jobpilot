@@ -181,6 +181,33 @@ async def async_apply_job(
             application_id=application.id
         )
 
+        if application.status != "review_ready":
+            requires_input = application.status == "requires_user_input"
+            message = application.failure_reason or (
+                "Manual input is required to continue this application."
+                if requires_input
+                else "The dry-run failed. Review the application details before retrying."
+            )
+            await event_stream.emit_event(
+                user_id=user_id_str,
+                event_type="USER_INPUT_REQUIRED" if requires_input else "DRY_RUN_FAILED",
+                message=message,
+                payload={
+                    "application_id": str(application.id),
+                    "status": application.status,
+                    "deep_link_url": application.deep_link_url,
+                    "failure_reason": application.failure_reason,
+                }
+            )
+            return {
+                "status": application.status,
+                "application_id": str(application.id),
+                "application_status": application.status,
+                "job_title": job.title,
+                "company": job.company_name,
+                "message": message,
+            }
+
         # 8. Check User's Apply Mode: Auto-submit vs Review
         if not is_dry_run or prefs.apply_mode in ["auto_apply", "auto_with_cap", "full_auto"]:
             application = await apply_service.approve_and_submit(

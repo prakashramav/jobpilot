@@ -158,6 +158,7 @@ async def get_pipeline_board(
         "interview": [],
         "offer": [],
         "rejected": [],
+        "needs_attention": [],
     }
 
     # Map applied job IDs — applied/rejected jobs must NEVER reappear in discovered/queued
@@ -181,7 +182,11 @@ async def get_pipeline_board(
             "applied_at": app.applied_at.isoformat() if app.applied_at else None,
             "updated_at": app.updated_at.isoformat(),
         }
-        if app.status in pipeline:
+        if app.status in ("failed", "requires_user_input"):
+            item["failure_reason"] = app.failure_reason
+            item["deep_link_url"] = app.deep_link_url
+            pipeline["needs_attention"].append(item)
+        elif app.status in pipeline:
             pipeline[app.status].append(item)
         else:
             pipeline["applied"].append(item)

@@ -45,14 +45,19 @@ export default function ReviewModal({ isOpen, onClose, application, onStatusUpda
     setMsg('');
     try {
       const res = await api.post(`/apply/${appId}/dry-run`);
-      setAppState({
+      const updatedApp = {
         ...app,
         ...res.data,
-        has_proof: true,
-        status: 'review_ready',
-      });
-      setMsg('Dry-run completed! Form filled and high-res proof screenshot captured.');
-      if (onStatusUpdate) onStatusUpdate('review_ready');
+        has_proof: Boolean(res.data.submission_proof_screenshot),
+        proof_text: res.data.submission_proof_text,
+      };
+      setAppState(updatedApp);
+      if (res.data.status === 'review_ready') {
+        setMsg('Dry-run completed! Form filled and high-res proof screenshot captured.');
+      } else {
+        setError(res.data.failure_reason || 'Dry-run could not complete. Review the job application details before retrying.');
+      }
+      if (onStatusUpdate) onStatusUpdate(res.data.status);
     } catch (err) {
       setError(err.response?.data?.detail || 'Dry-run execution failed.');
     } finally {
@@ -139,6 +144,12 @@ export default function ReviewModal({ isOpen, onClose, application, onStatusUpda
           <div className="mx-5 mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+        {!error && app.failure_reason && (
+          <div className="mx-5 mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{app.failure_reason}</span>
           </div>
         )}
 
@@ -263,7 +274,7 @@ export default function ReviewModal({ isOpen, onClose, application, onStatusUpda
             <button
               type="button"
               onClick={handleApprove}
-              disabled={submitting}
+              disabled={submitting || app.status !== 'review_ready'}
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-cyan-500 hover:from-emerald-500 hover:to-cyan-400 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95 transition-all"
             >
               {submitting ? (
