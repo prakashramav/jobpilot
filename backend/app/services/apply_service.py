@@ -39,7 +39,12 @@ class ApplyService:
         elif "ashby" in ats or "ashbyhq.com" in url:
             return self.ashby_filler
 
-        platform = "Workable" if "workable" in ats or "workable.com" in url else (ats_type or "unknown ATS")
+        if "workable" in ats or "workable.com" in url:
+            platform = "Workable"
+        elif ats in ("", "generic", "unknown"):
+            platform = "unknown ATS"
+        else:
+            platform = ats_type
         raise UnsupportedATSPlatformError(
             f"Automated form filling is not supported for {platform}. Open the job portal and apply manually."
         )
