@@ -19,6 +19,10 @@ from app.adapters.form_fillers.base import FormFillerResult
 logger = logging.getLogger(__name__)
 
 
+class UnsupportedATSPlatformError(ValueError):
+    """Raised when no form filler is available for a job's ATS platform."""
+
+
 class ApplyService:
     def __init__(self):
         self.greenhouse_filler = GreenhouseFormFiller()
@@ -26,17 +30,24 @@ class ApplyService:
         self.ashby_filler = AshbyFormFiller()
 
     def select_filler(self, ats_type: str, apply_url: str):
-        ats = ats_type.lower()
-        url = apply_url.lower()
+        ats = (ats_type or "").lower()
+        url = (apply_url or "").lower()
         if "greenhouse" in ats or "greenhouse.io" in url:
             return self.greenhouse_filler
         elif "lever" in ats or "lever.co" in url:
             return self.lever_filler
         elif "ashby" in ats or "ashbyhq.com" in url:
             return self.ashby_filler
+
+        if "workable" in ats or "workable.com" in url:
+            platform = "Workable"
+        elif ats in ("", "generic", "unknown"):
+            platform = "unknown ATS"
         else:
-            # Fallback to Greenhouse form structure
-            return self.greenhouse_filler
+            platform = ats_type
+        raise UnsupportedATSPlatformError(
+            f"Automated form filling is not supported for {platform}. Open the job portal and apply manually."
+        )
 
     async def get_or_create_application(
         self,
@@ -151,7 +162,28 @@ class ApplyService:
         pdf_path = tailored.pdf_storage_path if tailored else ""
         cover_letter = tailored.cover_letter if tailored else ""
 
-        filler = self.select_filler(job.ats_type, job.apply_url)
+        try:
+            filler = self.select_filler(job.ats_type, job.apply_url)
+        except UnsupportedATSPlatformError as exc:
+            application.failure_reason = str(exc)
+            application.deep_link_url = job.apply_url
+            application.submission_proof_screenshot = None
+            application.submission_proof_text = None
+            if application.status in ("review_ready", "failed", "requires_user_input"):
+                application.status = "tailored" if application.tailored_resume_id else "queued"
+            application.updated_at = utc_now()
+
+            db.add(ApplicationEvent(
+                id=uuid.uuid4(),
+                application_id=application.id,
+                event_type="ATS_UNSUPPORTED",
+                message=str(exc),
+                event_payload={"ats_type": job.ats_type, "apply_url": job.apply_url},
+                created_at=utc_now()
+            ))
+            await db.commit()
+            await db.refresh(application)
+            return application
 
         # Run filler
         result = await filler.fill_application(
@@ -166,19 +198,45 @@ class ApplyService:
             is_dry_run=True
         )
 
-        # If live website navigation errored or timed out, simulate local proof capture for testing
-        if not result.screenshot_path or not os.path.exists(result.screenshot_path):
-            mock_screenshot = os.path.join(filler.screenshot_dir, f"proof_simulated_{application.id}.png")
-            with open(mock_screenshot, "wb") as f:
-                # 1x1 transparent PNG header
-                f.write(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\r\xef\x8a\xaf\x00\x00\x00\x00IEND\xaeB`\x82")
-            result.screenshot_path = mock_screenshot
-            result.proof_text = f"Simulated dry-run proof for {job.company_name} ({job.ats_type}). All fields validated."
+        screenshot_exists = bool(result.screenshot_path and os.path.isfile(result.screenshot_path))
+        if not result.success or not screenshot_exists:
+            failure_reason = result.error_message or (
+                "Dry-run did not produce a real screenshot."
+                if result.success
+                else "The ATS form filler did not complete successfully."
+            )
+            application.is_dry_run = True
+            application.status = "requires_user_input" if result.requires_user_input else "failed"
+            application.failure_reason = failure_reason
+            application.deep_link_url = result.deep_link or (job.apply_url if result.requires_user_input else None)
+            application.submission_proof_screenshot = None
+            application.submission_proof_text = None
+            application.updated_at = utc_now()
+
+            requires_input = result.requires_user_input
+            event = ApplicationEvent(
+                id=uuid.uuid4(),
+                application_id=application.id,
+                event_type="USER_INPUT_REQUIRED" if requires_input else "DRY_RUN_FAILED",
+                message=(
+                    "The application needs manual input before it can continue."
+                    if requires_input
+                    else f"Dry-run failed: {failure_reason}"
+                ),
+                event_payload=result.to_dict(),
+                created_at=utc_now()
+            )
+            db.add(event)
+            await db.commit()
+            await db.refresh(application)
+            return application
 
         # Update application state
         application.is_dry_run = True
         application.submission_proof_screenshot = result.screenshot_path
         application.submission_proof_text = result.proof_text or f"Dry-run executed for {job.title} at {job.company_name}."
+        application.failure_reason = None
+        application.deep_link_url = None
         application.status = "review_ready"
         application.updated_at = utc_now()
 
@@ -212,6 +270,9 @@ class ApplyService:
         application = app_res.scalar_one_or_none()
         if not application:
             raise ValueError("Application not found.")
+
+        if application.status != "review_ready":
+            raise ValueError("Application must have a successful dry-run before it can be approved.")
 
         application.status = "applied"
         application.applied_at = utc_now()

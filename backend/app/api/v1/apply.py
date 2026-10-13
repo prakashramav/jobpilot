@@ -158,6 +158,7 @@ async def get_pipeline_board(
         "interview": [],
         "offer": [],
         "rejected": [],
+        "needs_attention": [],
     }
 
     # Map applied job IDs — applied/rejected jobs must NEVER reappear in discovered/queued
@@ -177,11 +178,15 @@ async def get_pipeline_board(
             "is_dry_run": app.is_dry_run,
             "has_proof": bool(app.submission_proof_screenshot),
             "proof_text": app.submission_proof_text,
+            "failure_reason": app.failure_reason,
+            "deep_link_url": app.deep_link_url,
             "tailored_resume_id": str(app.tailored_resume_id) if app.tailored_resume_id else None,
             "applied_at": app.applied_at.isoformat() if app.applied_at else None,
             "updated_at": app.updated_at.isoformat(),
         }
-        if app.status in pipeline:
+        if app.status in ("failed", "requires_user_input"):
+            pipeline["needs_attention"].append(item)
+        elif app.status in pipeline:
             pipeline[app.status].append(item)
         else:
             pipeline["applied"].append(item)

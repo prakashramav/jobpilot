@@ -22,13 +22,14 @@ const COLUMNS = [
   { id: 'review_ready', label: 'Review Ready (Proof)', color: 'border-amber-500/40 bg-amber-950/15' },
   { id: 'applied', label: 'Applied', color: 'border-emerald-500/30 bg-emerald-950/10' },
   { id: 'interview', label: 'Interview / Offer', color: 'border-violet-500/40 bg-violet-950/20' },
+  { id: 'needs_attention', label: 'Needs Attention', color: 'border-rose-500/40 bg-rose-950/15' },
 ];
 
-const DELETABLE_COLUMNS = new Set(['discovered', 'queued', 'tailored', 'review_ready']);
+const DELETABLE_COLUMNS = new Set(['discovered', 'queued', 'tailored', 'review_ready', 'needs_attention']);
 
 export default function DashboardPipelinePage() {
   const { user } = useAuth();
-  const [pipeline, setPipeline] = useState({ discovered: [], queued: [], tailored: [], review_ready: [], applied: [], interview: [], offer: [], rejected: [] });
+  const [pipeline, setPipeline] = useState({ discovered: [], queued: [], tailored: [], review_ready: [], applied: [], interview: [], offer: [], rejected: [], needs_attention: [] });
   const [safetyStatus, setSafetyStatus] = useState({ daily_cap: 15, applied_today: 0, remaining_today: 15, kill_switch_active: false, apply_mode: 'review_then_apply', is_cap_reached: false });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,7 +44,7 @@ export default function DashboardPipelinePage() {
   const [savingCap, setSavingCap] = useState(false);
 
   const handleLiveEvent = useCallback((event) => {
-    if (['APPLICATION_SUBMITTED', 'DRY_RUN_COMPLETED', 'DAILY_CAP_REACHED', 'KILL_SWITCH_ACTIVE'].includes(event.type)) {
+    if (['APPLICATION_SUBMITTED', 'DRY_RUN_COMPLETED', 'DRY_RUN_FAILED', 'USER_INPUT_REQUIRED', 'DAILY_CAP_REACHED', 'KILL_SWITCH_ACTIVE'].includes(event.type)) {
       setToastMessage(event.message);
       setTimeout(() => setToastMessage(null), 6000);
       fetchPipeline();
@@ -218,7 +219,7 @@ export default function DashboardPipelinePage() {
             <p className="text-xs text-slate-400 mt-2">Loading pipeline stages...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 items-start">
             {COLUMNS.map((col) => {
               const items = pipeline[col.id] || [];
               const canDelete = DELETABLE_COLUMNS.has(col.id);
@@ -274,6 +275,9 @@ export default function DashboardPipelinePage() {
                               <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-semibold">
                                 <Camera className="w-3 h-3" /><span>Dry-Run Proof Captured</span>
                               </div>
+                            )}
+                            {item.failure_reason && (
+                              <p className="text-[10px] text-rose-300 line-clamp-3">{item.failure_reason}</p>
                             )}
                             <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px]">
                               {item.match_score

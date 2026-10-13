@@ -116,6 +116,39 @@ def test_ranking_service_80_20_feed_mix():
     assert len(first_five_rem) == 1
 
 
+def test_preferred_city_jobs_rank_before_other_home_country_cities():
+    user = User(
+        id=uuid.uuid4(),
+        email="preferred_city_rank@example.com",
+        home_country="IN",
+        preferred_cities=["Bengaluru"],
+        open_to_international=False,
+    )
+    other_city_job = Job(
+        id=uuid.uuid4(),
+        company_name="ChennaiCo",
+        title="Software Engineer",
+        country="IN",
+        city="Chennai",
+        work_mode="onsite",
+    )
+    preferred_city_job = Job(
+        id=uuid.uuid4(),
+        company_name="BengaluruCo",
+        title="Software Engineer",
+        country="IN",
+        city="Bengaluru",
+        work_mode="onsite",
+    )
+
+    tier, included = ranking_service.classify_job_tier(other_city_job, user)
+    assert tier == 2
+    assert included is True
+
+    ranked = ranking_service.rank_and_mix_jobs([other_city_job, preferred_city_job], user=user)
+    assert [job.id for job in ranked] == [preferred_city_job.id, other_city_job.id]
+
+
 @pytest.mark.asyncio
 async def test_source_router_dispatch():
     """Verify source routing per country and terms_restricted flags."""

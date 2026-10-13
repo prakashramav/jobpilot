@@ -645,14 +645,6 @@ export default function OnboardingPage() {
     }
   };
 
-  // Sample Resume Loader
-  const handleLoadSample = async () => {
-    const sampleBlob = new Blob([SAMPLE_RESUME_TEXT], { type: 'text/plain' });
-    const sampleFile = new File([sampleBlob], 'alex_mercer_sample_resume.txt', { type: 'text/plain' });
-    setSelectedFile(sampleFile);
-    await handleFileUpload(sampleFile);
-  };
-
   // Step 2: Save Master Profile
   const handleSaveProfile = async () => {
     setError('');
@@ -1271,7 +1263,6 @@ export default function OnboardingPage() {
                 <ResumeUploader
                   onUploadSuccess={handleUploadComplete}
                   onSkipToManual={() => setStep(2)}
-                  sampleResumeText={SAMPLE_RESUME_TEXT}
                 />
               </div>
             )}
